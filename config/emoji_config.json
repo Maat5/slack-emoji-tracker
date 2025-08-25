@@ -1,0 +1,19 @@
+{
+  "emojis": {
+    "thumbsup": {"score": 1, "description": "Positive reaction"},
+    "heart": {"score": 2, "description": "Love and appreciation"},
+    "fire": {"score": 3, "description": "Excellent work"},
+    "rocket": {"score": 5, "description": "Exceptional performance"},
+    "trophy": {"score": 10, "description": "Major achievement"},
+    "star": {"score": 2, "description": "Great job"},
+    "clap": {"score": 1, "description": "Applause"},
+    "100": {"score": 4, "description": "Perfect"},
+    "muscle": {"score": 3, "description": "Strong work"},
+    "brain": {"score": 4, "description": "Smart thinking"}
+  },
+  "settings": {
+    "default_score": 1,
+    "track_all_emojis": false,
+    "case_sensitive": false
+  }
+}
