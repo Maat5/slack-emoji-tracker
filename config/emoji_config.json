@@ -1,0 +1,59 @@
+{
+  "emojis": {
+    "thumbsup": {
+      "name": "thumbsup",
+      "score": 1,
+      "description": "Positive reaction"
+    },
+    "heart": {
+      "name": "heart",
+      "score": 2,
+      "description": "Love and appreciation"
+    },
+    "fire": {
+      "name": "fire",
+      "score": 3,
+      "description": "Excellent work"
+    },
+    "clap": {
+      "name": "clap",
+      "score": 2,
+      "description": "Applause and recognition"
+    },
+    "star": {
+      "name": "star",
+      "score": 3,
+      "description": "Outstanding achievement"
+    },
+    "rocket": {
+      "name": "rocket",
+      "score": 5,
+      "description": "Exceptional performance"
+    },
+    "trophy": {
+      "name": "trophy",
+      "score": 10,
+      "description": "Major achievement"
+    },
+    "medal": {
+      "name": "medal",
+      "score": 5,
+      "description": "Recognition award"
+    },
+    "tada": {
+      "name": "tada",
+      "score": 3,
+      "description": "Celebration"
+    },
+    "100": {
+      "name": "100",
+      "score": 4,
+      "description": "Perfect score"
+    }
+  },
+  "settings": {
+    "default_score": 1,
+    "track_all_emojis": false,
+    "case_sensitive": false
+  }
+}
