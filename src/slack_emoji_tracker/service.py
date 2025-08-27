@@ -3,10 +3,11 @@
 import logging
 import re
 from datetime import datetime
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
+from slack_sdk.web import WebClient
 
 from .config import config
 from .models import Channel, EmojiStats, EmojiUsage, User
@@ -17,9 +18,10 @@ logger = logging.getLogger(__name__)
 class EmojiService:
     """Service for managing emoji tracking and statistics."""
 
-    def __init__(self, db_session: Session):
-        """Initialize the service with a database session."""
+    def __init__(self, db_session: Session, web_client: Optional[WebClient] = None):
+        """Initialize the service with a database session and optional Slack web client."""
         self.db = db_session
+        self.web_client = web_client
 
     def create_or_update_user(
         self,
@@ -28,9 +30,33 @@ class EmojiService:
         display_name: Optional[str] = None,
         real_name: Optional[str] = None,
         is_bot: bool = False,
+        fetch_from_slack: bool = True,
     ) -> User:
         """Create a new user or update existing user information."""
         user = self.db.query(User).filter(User.slack_id == slack_id).first()
+        
+        # Fetch user information from Slack API if available and requested
+        slack_user_info = None
+        if fetch_from_slack and self.web_client:
+            try:
+                response = self.web_client.users_info(user=slack_id)
+                if response.get("ok"):
+                    slack_user_info = response.get("user", {})
+                    profile = slack_user_info.get("profile", {})
+                    
+                    # Override with Slack data if not explicitly provided
+                    if email is None:
+                        email = profile.get("email")
+                    if display_name is None:
+                        display_name = profile.get("display_name") or slack_user_info.get("name")
+                    if real_name is None:
+                        real_name = profile.get("real_name")
+                    is_bot = slack_user_info.get("is_bot", False)
+                    
+                    logger.info(f"Fetched user info from Slack for {slack_id}: {display_name}")
+                    
+            except Exception as e:
+                logger.warning(f"Failed to fetch user info from Slack for {slack_id}: {e}")
         
         if user:
             # Update existing user
@@ -42,6 +68,7 @@ class EmojiService:
                 user.real_name = real_name
             user.is_bot = is_bot
             user.updated_at = datetime.utcnow()
+            logger.debug(f"Updated existing user {slack_id}")
         else:
             # Create new user
             user = User(
@@ -52,6 +79,7 @@ class EmojiService:
                 is_bot=is_bot,
             )
             self.db.add(user)
+            logger.info(f"Created new user {slack_id} with display_name: {display_name}")
         
         self.db.flush()  # Get the ID without committing
         return user
@@ -351,6 +379,15 @@ class EmojiService:
         # Find all emojis in format :emoji_name:
         emoji_pattern = r":([a-zA-Z0-9_+-]+):"
         return re.findall(emoji_pattern, text)
+
+    def extract_user_mentions(self, text: str) -> List[str]:
+        """Extract user IDs from Slack message text.
+        
+        Slack mentions come in format <@USER_ID> or <@USER_ID|display_name>
+        """
+        # Pattern to match <@USER_ID> or <@USER_ID|display_name>
+        mention_pattern = r"<@([A-Z0-9]+)(?:\|[^>]+)?>"
+        return re.findall(mention_pattern, text)
 
     def get_channel_stats(self, channel_slack_id: str) -> Optional[Dict]:
         """Get emoji statistics for a specific channel."""

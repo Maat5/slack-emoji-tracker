@@ -19,7 +19,7 @@ def create_sample_data():
     print("🔄 Creating sample data...")
     
     with get_db_session() as db:
-        service = EmojiService(db)
+        service = EmojiService(db, None)  # No Slack API needed for sample data
         
         # Create some sample users
         print("👥 Creating sample users...")

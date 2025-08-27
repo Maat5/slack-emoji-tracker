@@ -178,7 +178,7 @@ class SlackService:
         
         # Track the emoji usage
         with get_db_session() as db:
-            emoji_service = EmojiService(db)
+            emoji_service = EmojiService(db, self.web_client)
             emoji_service.track_emoji_usage(
                 user_slack_id=user_id,
                 emoji_name=reaction,
@@ -190,37 +190,77 @@ class SlackService:
 
     async def _handle_message(self, event: Dict[str, Any]) -> None:
         """Handle message events to track emojis in message text."""
-        user_id = event.get("user")
+        sender_user_id = event.get("user")
         text = event.get("text", "")
         channel = event.get("channel")
         ts = event.get("ts")
         
         # Skip bot messages and messages without text
-        if not user_id or not text or event.get("subtype") == "bot_message":
+        if not sender_user_id or not text or event.get("subtype") == "bot_message":
             return
         
-        # Extract emojis from the message text
+        # Extract emojis and user mentions from the message text
         with get_db_session() as db:
-            emoji_service = EmojiService(db)
+            emoji_service = EmojiService(db, self.web_client)
             emojis = emoji_service.extract_emojis_from_text(text)
+            mentioned_user_ids = emoji_service.extract_user_mentions(text)
             
-            # Track each emoji found in the message
+            # If no emojis found, nothing to track
+            if not emojis:
+                return
+            
+            # Get sender information for feedback
+            sender_info = emoji_service.create_or_update_user(sender_user_id)
+            
             tracked_emojis = []
-            for emoji in emojis:
-                usage = emoji_service.track_emoji_usage(
-                    user_slack_id=user_id,
-                    emoji_name=emoji,
-                    usage_type="message",
-                    channel_slack_id=channel,
-                    message_ts=ts,
-                )
-                if usage:  # Only add if the emoji was actually tracked
-                    tracked_emojis.append(emoji)
             
-            # Send ephemeral feedback if emojis were tracked
-            # if tracked_emojis and channel:
-            feedback_text = f"Bloom send! {text}"
-            await self.send_ephemeral_message(channel, user_id, feedback_text)
+            # If there are mentioned users, track emojis for each sender->receiver pair
+            if mentioned_user_ids:
+                for mentioned_user_id in mentioned_user_ids:
+                    # Skip self-mentions
+                    if mentioned_user_id == sender_user_id:
+                        continue
+                    
+                    # Track each emoji for this sender->receiver pair
+                    for emoji in emojis:
+                        usage = emoji_service.track_emoji_usage(
+                            user_slack_id=sender_user_id,
+                            emoji_name=emoji,
+                            usage_type="message",
+                            channel_slack_id=channel,
+                            message_ts=ts,
+                            target_user_slack_id=mentioned_user_id,
+                        )
+                        if usage and emoji not in tracked_emojis:
+                            tracked_emojis.append(emoji)
+                    
+                    # Send ephemeral message to receiver
+                    if tracked_emojis:
+                        receiving_feedback_text = f"You have received a Bloom from {sender_info.display_name or sender_user_id}: \n\n {text}"
+                        await self.send_ephemeral_message(mentioned_user_id, receiving_feedback_text)
+                        logger.info(f"Sent bloom notification to {mentioned_user_id} from {sender_user_id}")
+            
+            else:
+                # No mentions - track as general message emojis (legacy behavior)
+                for emoji in emojis:
+                    usage = emoji_service.track_emoji_usage(
+                        user_slack_id=sender_user_id,
+                        emoji_name=emoji,
+                        usage_type="message",
+                        channel_slack_id=channel,
+                        message_ts=ts,
+                    )
+                    if usage:
+                        tracked_emojis.append(emoji)
+            
+            # Send ephemeral feedback to sender if emojis were tracked
+            if tracked_emojis:
+                if mentioned_user_ids:
+                    sending_feedback_text = f"You have sent a Bloom to {len(mentioned_user_ids)} user(s): \n\n {text}"
+                else:
+                    sending_feedback_text = f"You have sent a Bloom: \n\n {text}"
+                await self.send_ephemeral_message(sender_user_id, sending_feedback_text)
+                logger.info(f"Processed bloom from {sender_user_id} with {len(tracked_emojis)} emojis to {len(mentioned_user_ids)} users")
 
     async def _handle_user_change(self, event: Dict[str, Any]) -> None:
         """Handle user_change events to update user information."""
@@ -232,7 +272,7 @@ class SlackService:
         
         # Update user information
         with get_db_session() as db:
-            emoji_service = EmojiService(db)
+            emoji_service = EmojiService(db, self.web_client)
             profile = user_data.get("profile", {})
             
             emoji_service.create_or_update_user(
@@ -253,7 +293,7 @@ class SlackService:
         
         # Update channel information
         with get_db_session() as db:
-            emoji_service = EmojiService(db)
+            emoji_service = EmojiService(db, self.web_client)
             
             emoji_service.create_or_update_channel(
                 slack_id=channel_id,
@@ -262,7 +302,7 @@ class SlackService:
                 is_archived=channel_data.get("is_archived", False),
             )
 
-    async def send_ephemeral_message(self, channel: str, user: str, text: str) -> bool:
+    async def send_ephemeral_message(self, user: str, text: str) -> bool:
         """Send an ephemeral message to a specific user in a channel."""
         try:
             response = self.web_client.chat_postEphemeral(
@@ -272,7 +312,7 @@ class SlackService:
             )
             return response.get("ok", False)
         except Exception as e:
-            logger.error(f"Error sending ephemeral message to {user} in {channel}: {e}")
+            logger.error(f"Error sending ephemeral message to {user}: {e}")
             return False
 
     async def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -311,7 +351,7 @@ class SlackService:
         try:
             cursor = None
             with get_db_session() as db:
-                emoji_service = EmojiService(db)
+                emoji_service = EmojiService(db, self.web_client)
                 
                 while True:
                     # Get users from Slack API
@@ -363,7 +403,7 @@ class SlackService:
         try:
             cursor = None
             with get_db_session() as db:
-                emoji_service = EmojiService(db)
+                emoji_service = EmojiService(db, self.web_client)
                 
                 while True:
                     # Get channels from Slack API

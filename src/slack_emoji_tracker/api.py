@@ -102,7 +102,7 @@ async def get_user_stats(slack_id: str, db: Session = Depends(get_db)):
     """
     Get comprehensive statistics for a specific user including totals and top emojis given/received.
     """
-    emoji_service = EmojiService(db)
+    emoji_service = EmojiService(db, slack_service.web_client if slack_service else None)
     stats = emoji_service.get_user_stats(slack_id)
     
     if not stats:
@@ -123,7 +123,7 @@ async def get_leaderboard(
     """
     Get leaderboard data sorted by various metrics (received/given score/count).
     """
-    emoji_service = EmojiService(db)
+    emoji_service = EmojiService(db, slack_service.web_client if slack_service else None)
     entries = emoji_service.get_leaderboard(sort_by=sort_by, limit=limit)
     
     return LeaderboardResponse(
@@ -143,7 +143,7 @@ async def get_user_history(
     """
     Get recent emoji usage history for a specific user with pagination.
     """
-    emoji_service = EmojiService(db)
+    emoji_service = EmojiService(db, slack_service.web_client if slack_service else None)
     history = emoji_service.get_user_history(slack_id, limit=limit, offset=offset)
     
     if not history:
@@ -171,7 +171,7 @@ async def get_channel_stats(channel_id: str, db: Session = Depends(get_db)):
     """
     Get emoji statistics for a specific channel including totals, top emojis, and top users.
     """
-    emoji_service = EmojiService(db)
+    emoji_service = EmojiService(db, slack_service.web_client if slack_service else None)
     stats = emoji_service.get_channel_stats(channel_id)
     
     if not stats:
