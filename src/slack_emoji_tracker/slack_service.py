@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from datetime import datetime
 from typing import Any, Dict, Optional
 
 from slack_sdk.socket_mode import SocketModeClient
@@ -40,11 +41,11 @@ class SlackService:
         
         try:
             # Test the connection first
-            auth_response = await asyncio.to_thread(self.web_client.auth_test)
+            auth_response = self.web_client.auth_test()
             logger.info(f"Connected to Slack as: {auth_response['user']}")
             
             # Start the socket mode client
-            await asyncio.to_thread(self.socket_client.connect)
+            self.socket_client.connect()
             logger.info("Slack Socket Mode connection established")
             
         except Exception as e:
@@ -55,7 +56,7 @@ class SlackService:
         """Stop the Slack Socket Mode connection."""
         logger.info("Stopping Slack Socket Mode connection...")
         try:
-            await asyncio.to_thread(self.socket_client.disconnect)
+            self.socket_client.disconnect()
             logger.info("Slack Socket Mode connection closed")
         except Exception as e:
             logger.error(f"Error stopping Slack service: {e}")
@@ -69,10 +70,32 @@ class SlackService:
             
             # Process the event asynchronously
             if req.type == "events_api":
-                asyncio.create_task(self._handle_event(req.payload))
+                self._schedule_async_task(self._handle_event(req.payload))
+            elif req.type == "slash_commands":
+                self._schedule_async_task(self._handle_slash_command(req.payload))
                 
         except Exception as e:
             logger.error(f"Error handling Socket Mode request: {e}")
+
+    def _schedule_async_task(self, coro):
+        """Schedule an async task, handling event loop context properly."""
+        try:
+            # Try to get the current event loop
+            loop = asyncio.get_running_loop()
+            # Schedule the task in the running loop
+            loop.create_task(coro)
+        except RuntimeError:
+            # No running event loop, create a new one in a thread
+            import threading
+            
+            def run_in_thread():
+                try:
+                    asyncio.run(coro)
+                except Exception as e:
+                    logger.error(f"Error running async task: {e}")
+            
+            thread = threading.Thread(target=run_in_thread, daemon=True)
+            thread.start()
 
     async def _handle_event(self, payload: Dict[str, Any]) -> None:
         """Handle Slack events."""
@@ -94,6 +117,33 @@ class SlackService:
         except Exception as e:
             logger.error(f"Error processing event {event_type}: {e}")
 
+    async def _handle_slash_command(self, payload: Dict[str, Any]) -> None:
+        """Handle Slack slash commands."""
+        command = payload.get("command", "")
+        user_id = payload.get("user_id")
+        channel_id = payload.get("channel_id")
+        text = payload.get("text", "")
+        
+        logger.debug(f"Received slash command: {command} from user {user_id}")
+        
+        try:
+            if command == "/bloom":
+                # Create a mock message event to reuse _handle_message logic
+                mock_event = {
+                    "user": user_id,
+                    "text": text,
+                    "channel": channel_id,
+                    "ts": str(datetime.utcnow().timestamp()),
+                }
+                await self._handle_message(mock_event)
+                logger.info(f"Processed /bloom command from user {user_id} with text: '{text}'")
+                
+            else:
+                logger.debug(f"Unhandled slash command: {command}")
+                
+        except Exception as e:
+            logger.error(f"Error processing slash command {command}: {e}")
+
     async def _handle_reaction_added(self, event: Dict[str, Any]) -> None:
         """Handle reaction_added events."""
         user_id = event.get("user")
@@ -112,8 +162,7 @@ class SlackService:
             
             # Try to get the message to find the author
             try:
-                message_info = await asyncio.to_thread(
-                    self.web_client.conversations_history,
+                message_info = self.web_client.conversations_history(
                     channel=channel_id,
                     latest=message_ts,
                     limit=1,
@@ -156,14 +205,22 @@ class SlackService:
             emojis = emoji_service.extract_emojis_from_text(text)
             
             # Track each emoji found in the message
+            tracked_emojis = []
             for emoji in emojis:
-                emoji_service.track_emoji_usage(
+                usage = emoji_service.track_emoji_usage(
                     user_slack_id=user_id,
                     emoji_name=emoji,
                     usage_type="message",
                     channel_slack_id=channel,
                     message_ts=ts,
                 )
+                if usage:  # Only add if the emoji was actually tracked
+                    tracked_emojis.append(emoji)
+            
+            # Send ephemeral feedback if emojis were tracked
+            # if tracked_emojis and channel:
+            feedback_text = f"Bloom send! {text}"
+            await self.send_ephemeral_message(channel, user_id, feedback_text)
 
     async def _handle_user_change(self, event: Dict[str, Any]) -> None:
         """Handle user_change events to update user information."""
@@ -205,12 +262,23 @@ class SlackService:
                 is_archived=channel_data.get("is_archived", False),
             )
 
+    async def send_ephemeral_message(self, channel: str, user: str, text: str) -> bool:
+        """Send an ephemeral message to a specific user in a channel."""
+        try:
+            response = self.web_client.chat_postEphemeral(
+                channel=user,
+                user=user,
+                text=text
+            )
+            return response.get("ok", False)
+        except Exception as e:
+            logger.error(f"Error sending ephemeral message to {user} in {channel}: {e}")
+            return False
+
     async def get_user_info(self, user_id: str) -> Optional[Dict[str, Any]]:
         """Get user information from Slack API."""
         try:
-            response = await asyncio.to_thread(
-                self.web_client.users_info, user=user_id
-            )
+            response = self.web_client.users_info(user=user_id)
             return response.get("user")
         except Exception as e:
             logger.error(f"Error fetching user info for {user_id}: {e}")
@@ -219,9 +287,7 @@ class SlackService:
     async def get_channel_info(self, channel_id: str) -> Optional[Dict[str, Any]]:
         """Get channel information from Slack API."""
         try:
-            response = await asyncio.to_thread(
-                self.web_client.conversations_info, channel=channel_id
-            )
+            response = self.web_client.conversations_info(channel=channel_id)
             return response.get("channel")
         except Exception as e:
             logger.error(f"Error fetching channel info for {channel_id}: {e}")
@@ -230,7 +296,7 @@ class SlackService:
     async def test_connection(self) -> bool:
         """Test the Slack connection."""
         try:
-            auth_response = await asyncio.to_thread(self.web_client.auth_test)
+            auth_response = self.web_client.auth_test()
             logger.info(f"Slack connection test successful: {auth_response.get('user')}")
             return True
         except Exception as e:
@@ -249,8 +315,7 @@ class SlackService:
                 
                 while True:
                     # Get users from Slack API
-                    users_response = await asyncio.to_thread(
-                        self.web_client.users_list,
+                    users_response = self.web_client.users_list(
                         limit=min(limit, 200),  # Slack API limit
                         cursor=cursor,
                     )
@@ -302,8 +367,7 @@ class SlackService:
                 
                 while True:
                     # Get channels from Slack API
-                    channels_response = await asyncio.to_thread(
-                        self.web_client.conversations_list,
+                    channels_response = self.web_client.conversations_list(
                         limit=min(limit, 200),  # Slack API limit
                         cursor=cursor,
                         types="public_channel,private_channel",

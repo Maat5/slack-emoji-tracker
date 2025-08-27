@@ -134,6 +134,7 @@ LOG_LEVEL=INFO
    - `groups:read`
    - `users:read`
    - `users:read.email`
+   - `chat:write` (for ephemeral message feedback)
 4. Subscribe to Bot Events:
    - `reaction_added`
    - `message.channels`
