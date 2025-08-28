@@ -64,6 +64,9 @@ class SlackService:
     def _handle_socket_mode_request(self, client: SocketModeClient, req: SocketModeRequest) -> None:
         """Handle incoming Socket Mode requests."""
         try:
+            # Debug: Log the request type
+            logger.debug(f"Socket Mode request type: {req.type}")
+            
             # Acknowledge the request
             response = SocketModeResponse(envelope_id=req.envelope_id)
             client.send_socket_mode_response(response)
@@ -73,6 +76,8 @@ class SlackService:
                 self._schedule_async_task(self._handle_event(req.payload))
             elif req.type == "slash_commands":
                 self._schedule_async_task(self._handle_slash_command(req.payload))
+            else:
+                logger.debug(f"Unhandled request type: {req.type}")
                 
         except Exception as e:
             logger.error(f"Error handling Socket Mode request: {e}")
@@ -105,14 +110,13 @@ class SlackService:
         logger.debug(f"Received event: {event_type}")
         
         try:
+            print('>>>>>', event_type)
             if event_type == "reaction_added":
                 await self._handle_reaction_added(event)
             elif event_type == "message":
                 await self._handle_message(event)
             elif event_type == "user_change":
                 await self._handle_user_change(event)
-            elif event_type == "channel_created" or event_type == "channel_rename":
-                await self._handle_channel_change(event)
                 
         except Exception as e:
             logger.error(f"Error processing event {event_type}: {e}")
@@ -124,16 +128,22 @@ class SlackService:
         channel_id = payload.get("channel_id")
         text = payload.get("text", "")
         
+        # Debug: Log slash command info
+        logger.debug(f"Processing slash command {command} from {user_id}: '{text}'")
+        
         logger.debug(f"Received slash command: {command} from user {user_id}")
         
         try:
             if command == "/bloom":
                 # Create a mock message event to reuse _handle_message logic
+                # Include the original payload for mention extraction
                 mock_event = {
                     "user": user_id,
                     "text": text,
                     "channel": channel_id,
                     "ts": str(datetime.utcnow().timestamp()),
+                    # Include original slash command payload for mention extraction
+                    "slash_command_payload": payload,
                 }
                 await self._handle_message(mock_event)
                 logger.info(f"Processed /bloom command from user {user_id} with text: '{text}'")
@@ -154,13 +164,14 @@ class SlackService:
             logger.warning("Missing user or reaction in reaction_added event")
             return
         
-        # Get the target user (who received the reaction)
+        # Get the target user (who received the reaction) and message text
         target_user_id = None
+        message_text = None
         if item.get("type") == "message":
             channel_id = item.get("channel")
             message_ts = item.get("ts")
             
-            # Try to get the message to find the author
+            # Try to get the message to find the author and text
             try:
                 message_info = self.web_client.conversations_history(
                     channel=channel_id,
@@ -172,6 +183,7 @@ class SlackService:
                 messages = message_info.get("messages", [])
                 if messages:
                     target_user_id = messages[0].get("user")
+                    message_text = messages[0].get("text", "")
                     
             except Exception as e:
                 logger.warning(f"Could not fetch message info: {e}")
@@ -185,6 +197,7 @@ class SlackService:
                 usage_type="reaction",
                 channel_slack_id=item.get("channel"),
                 message_ts=item.get("ts"),
+                message_text=message_text,
                 target_user_slack_id=target_user_id,
             )
 
@@ -195,15 +208,24 @@ class SlackService:
         channel = event.get("channel")
         ts = event.get("ts")
         
+        # Debug: Log basic message info
+        logger.debug(f"Processing message from {sender_user_id} in {channel}: '{text[:50]}...' ")
+        
         # Skip bot messages and messages without text
         if not sender_user_id or not text or event.get("subtype") == "bot_message":
             return
         
-        # Extract emojis and user mentions from the message text
+        # Extract emojis and user mentions from the message text and payload
         with get_db_session() as db:
             emoji_service = EmojiService(db, self.web_client)
             emojis = emoji_service.extract_emojis_from_text(text)
-            mentioned_user_ids = emoji_service.extract_user_mentions(text)
+            mentioned_user_ids = emoji_service.extract_user_mentions(text, event)
+            
+            logger.debug(f'Mentioned user IDs: {mentioned_user_ids}')
+            
+            # Ensure all mentioned users exist in the database
+            if mentioned_user_ids:
+                emoji_service.ensure_users_exist(mentioned_user_ids)
             
             # If no emojis found, nothing to track
             if not emojis:
@@ -229,6 +251,7 @@ class SlackService:
                             usage_type="message",
                             channel_slack_id=channel,
                             message_ts=ts,
+                            message_text=text,
                             target_user_slack_id=mentioned_user_id,
                         )
                         if usage and emoji not in tracked_emojis:
@@ -249,6 +272,7 @@ class SlackService:
                         usage_type="message",
                         channel_slack_id=channel,
                         message_ts=ts,
+                        message_text=text,
                     )
                     if usage:
                         tracked_emojis.append(emoji)

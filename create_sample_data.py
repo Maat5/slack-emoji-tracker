@@ -59,35 +59,35 @@ def create_sample_data():
         print("😀 Creating sample emoji usage...")
         
         # Alice gives reactions
-        service.track_emoji_usage("U1234567890", "thumbsup", "reaction", "C1234567890", "1609459200.123", "U1234567891")
-        service.track_emoji_usage("U1234567890", "heart", "reaction", "C1234567890", "1609459201.123", "U1234567891")
-        service.track_emoji_usage("U1234567890", "fire", "reaction", "C1234567891", "1609459202.123", "U1234567892")
-        service.track_emoji_usage("U1234567890", "rocket", "reaction", "C1234567891", "1609459203.123", "U1234567893")
-        service.track_emoji_usage("U1234567890", "trophy", "reaction", "C1234567892", "1609459204.123", "U1234567894")
+        service.track_emoji_usage("U1234567890", "thumbsup", "reaction", "C1234567890", "1609459200.123", "Great work on the project!", "U1234567891")
+        service.track_emoji_usage("U1234567890", "heart", "reaction", "C1234567890", "1609459201.123", "Thanks for the help!", "U1234567891")
+        service.track_emoji_usage("U1234567890", "fire", "reaction", "C1234567891", "1609459202.123", "Amazing presentation today", "U1234567892")
+        service.track_emoji_usage("U1234567890", "rocket", "reaction", "C1234567891", "1609459203.123", "Let's ship this feature", "U1234567893")
+        service.track_emoji_usage("U1234567890", "trophy", "reaction", "C1234567892", "1609459204.123", "Congratulations on the win!", "U1234567894")
         
         # Bob gives reactions
-        service.track_emoji_usage("U1234567891", "thumbsup", "reaction", "C1234567890", "1609459205.123", "U1234567890")
-        service.track_emoji_usage("U1234567891", "heart", "reaction", "C1234567890", "1609459206.123", "U1234567892")
-        service.track_emoji_usage("U1234567891", "fire", "reaction", "C1234567891", "1609459207.123", "U1234567893")
-        service.track_emoji_usage("U1234567891", "star", "reaction", "C1234567891", "1609459208.123", "U1234567894")
+        service.track_emoji_usage("U1234567891", "thumbsup", "reaction", "C1234567890", "1609459205.123", "Nice code review feedback", "U1234567890")
+        service.track_emoji_usage("U1234567891", "heart", "reaction", "C1234567890", "1609459206.123", "Love the new design", "U1234567892")
+        service.track_emoji_usage("U1234567891", "fire", "reaction", "C1234567891", "1609459207.123", "Hot fix deployed successfully", "U1234567893")
+        service.track_emoji_usage("U1234567891", "star", "reaction", "C1234567891", "1609459208.123", "Outstanding performance", "U1234567894")
         
         # Charlie gives reactions
-        service.track_emoji_usage("U1234567892", "heart", "reaction", "C1234567890", "1609459209.123", "U1234567890")
-        service.track_emoji_usage("U1234567892", "clap", "reaction", "C1234567890", "1609459210.123", "U1234567891")
-        service.track_emoji_usage("U1234567892", "100", "reaction", "C1234567891", "1609459211.123", "U1234567893")
-        service.track_emoji_usage("U1234567892", "muscle", "reaction", "C1234567891", "1609459212.123", "U1234567894")
+        service.track_emoji_usage("U1234567892", "heart", "reaction", "C1234567890", "1609459209.123", "Thanks for mentoring me", "U1234567890")
+        service.track_emoji_usage("U1234567892", "clap", "reaction", "C1234567890", "1609459210.123", "Great job on the demo", "U1234567891")
+        service.track_emoji_usage("U1234567892", "100", "reaction", "C1234567891", "1609459211.123", "Perfect solution!", "U1234567893")
+        service.track_emoji_usage("U1234567892", "muscle", "reaction", "C1234567891", "1609459212.123", "Strong work ethic", "U1234567894")
         
         # Diana uses emojis in messages
-        service.track_emoji_usage("U1234567893", "brain", "message", "C1234567892", "1609459213.123")
-        service.track_emoji_usage("U1234567893", "fire", "message", "C1234567892", "1609459214.123")
-        service.track_emoji_usage("U1234567893", "rocket", "message", "C1234567893", "1609459215.123")
+        service.track_emoji_usage("U1234567893", "brain", "message", "C1234567892", "1609459213.123", "Big brain energy today! :brain:")
+        service.track_emoji_usage("U1234567893", "fire", "message", "C1234567892", "1609459214.123", "This feature is :fire:")
+        service.track_emoji_usage("U1234567893", "rocket", "message", "C1234567893", "1609459215.123", "Ready to :rocket: this to production")
         
         # Eve gives more reactions to create interesting leaderboard data
-        service.track_emoji_usage("U1234567894", "trophy", "reaction", "C1234567890", "1609459216.123", "U1234567890")
-        service.track_emoji_usage("U1234567894", "trophy", "reaction", "C1234567890", "1609459217.123", "U1234567891")
-        service.track_emoji_usage("U1234567894", "rocket", "reaction", "C1234567891", "1609459218.123", "U1234567892")
-        service.track_emoji_usage("U1234567894", "fire", "reaction", "C1234567891", "1609459219.123", "U1234567893")
-        service.track_emoji_usage("U1234567894", "heart", "reaction", "C1234567892", "1609459220.123", "U1234567890")
+        service.track_emoji_usage("U1234567894", "trophy", "reaction", "C1234567890", "1609459216.123", "Achievement unlocked!", "U1234567890")
+        service.track_emoji_usage("U1234567894", "trophy", "reaction", "C1234567890", "1609459217.123", "Winner winner!", "U1234567891")
+        service.track_emoji_usage("U1234567894", "rocket", "reaction", "C1234567891", "1609459218.123", "To the moon!", "U1234567892")
+        service.track_emoji_usage("U1234567894", "fire", "reaction", "C1234567891", "1609459219.123", "Burning through tasks", "U1234567893")
+        service.track_emoji_usage("U1234567894", "heart", "reaction", "C1234567892", "1609459220.123", "Much appreciated", "U1234567890")
         
         print("✅ Sample data created successfully!")
         print()

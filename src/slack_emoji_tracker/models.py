@@ -69,6 +69,7 @@ class EmojiUsage(Base):
     emoji_score = Column(Integer, default=1)
     usage_type = Column(String(20), nullable=False)  # 'reaction' or 'message'
     message_ts = Column(String(50), nullable=True)  # Slack message timestamp
+    message_text = Column(Text, nullable=True)  # Full message text for context
     target_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)  # For reactions
     created_at = Column(DateTime, default=func.now(), index=True)
 

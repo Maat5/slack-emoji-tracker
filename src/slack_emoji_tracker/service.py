@@ -3,7 +3,7 @@
 import logging
 import re
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import and_, desc, func
 from sqlalchemy.orm import Session
@@ -121,6 +121,7 @@ class EmojiService:
         usage_type: str,
         channel_slack_id: Optional[str] = None,
         message_ts: Optional[str] = None,
+        message_text: Optional[str] = None,
         target_user_slack_id: Optional[str] = None,
     ) -> Optional[EmojiUsage]:
         """Track a single emoji usage event."""
@@ -138,9 +139,9 @@ class EmojiService:
         if channel_slack_id:
             channel = self.create_or_update_channel(channel_slack_id)
         
-        # Get target user for reactions
+        # Get target user for reactions and message mentions
         target_user = None
-        if target_user_slack_id and usage_type == "reaction":
+        if target_user_slack_id:
             target_user = self.create_or_update_user(target_user_slack_id)
         
         # Create emoji usage record
@@ -151,6 +152,7 @@ class EmojiService:
             emoji_score=emoji_score,
             usage_type=usage_type,
             message_ts=message_ts,
+            message_text=message_text,
             target_user_id=target_user.id if target_user else None,
         )
         
@@ -159,14 +161,20 @@ class EmojiService:
         # Update statistics
         self._update_emoji_stats(user.id, emoji_name, emoji_score, "given")
         
-        # Update target user stats for reactions
+        # Update target user stats for reactions and message mentions
         if target_user:
             self._update_emoji_stats(target_user.id, emoji_name, emoji_score, "received")
         
-        logger.info(
-            f"Tracked emoji usage: {user_slack_id} used {emoji_name} "
-            f"(score: {emoji_score}, type: {usage_type})"
-        )
+        if target_user_slack_id:
+            logger.info(
+                f"Tracked emoji usage: {user_slack_id} sent {emoji_name} to {target_user_slack_id} "
+                f"(score: {emoji_score}, type: {usage_type})"
+            )
+        else:
+            logger.info(
+                f"Tracked emoji usage: {user_slack_id} used {emoji_name} "
+                f"(score: {emoji_score}, type: {usage_type})"
+            )
         
         return usage
 
@@ -380,14 +388,178 @@ class EmojiService:
         emoji_pattern = r":([a-zA-Z0-9_+-]+):"
         return re.findall(emoji_pattern, text)
 
-    def extract_user_mentions(self, text: str) -> List[str]:
-        """Extract user IDs from Slack message text.
+    def extract_user_mentions(self, text: str, event_payload: Optional[Dict[str, Any]] = None) -> List[str]:
+        """Extract user IDs from Slack message text and event payload.
         
-        Slack mentions come in format <@USER_ID> or <@USER_ID|display_name>
+        Handles multiple sources:
+        1. Slack API format in text: <@USER_ID> or <@USER_ID|display_name>
+        2. Event payload blocks/elements (for rich text)
+        3. Display format: @username (attempts to resolve via Slack API)
         """
-        # Pattern to match <@USER_ID> or <@USER_ID|display_name>
-        mention_pattern = r"<@([A-Z0-9]+)(?:\|[^>]+)?>"
-        return re.findall(mention_pattern, text)
+        user_ids = []
+        
+        # Method 1: Extract from event payload blocks (most reliable)
+        if event_payload:
+            payload_mentions = self._extract_mentions_from_payload(event_payload)
+            user_ids.extend(payload_mentions)
+            logger.debug(f'Payload mentions: {payload_mentions}')
+        
+        # Method 2: Extract Slack's internal format <@USER_ID> from text
+        slack_mention_pattern = r"<@([A-Z0-9]+)(?:\|[^>]+)?>"
+        slack_mentions = re.findall(slack_mention_pattern, text)
+        user_ids.extend(slack_mentions)
+        
+        # Method 3: Extract display format @username and try to resolve them
+        display_mention_pattern = r"@([a-zA-Z0-9._-]+)"
+        display_mentions = re.findall(display_mention_pattern, text)
+        
+        # Remove display mentions that are part of slack mentions (avoid duplicates)
+        text_without_slack_mentions = re.sub(slack_mention_pattern, "", text)
+        display_mentions = re.findall(display_mention_pattern, text_without_slack_mentions)
+        
+        # Try to resolve display names to user IDs if we have a web client
+        if display_mentions and self.web_client:
+            resolved_ids = self._resolve_display_names_to_user_ids(display_mentions)
+            user_ids.extend(resolved_ids)
+        
+        # Remove duplicates while preserving order
+        unique_user_ids = list(dict.fromkeys(user_ids))
+        
+        logger.debug(f'Slack mentions: {slack_mentions}')
+        logger.debug(f'Display mentions: {display_mentions}')
+        logger.debug(f'Final user IDs: {unique_user_ids}')
+        
+        return unique_user_ids
+
+    def _extract_mentions_from_payload(self, payload: Dict[str, Any]) -> List[str]:
+        """Extract user mentions from Slack event payload blocks/elements."""
+        user_ids = []
+        
+        try:
+            # Check if payload has blocks (rich text format)
+            blocks = payload.get("blocks", [])
+            for block in blocks:
+                if block.get("type") == "rich_text":
+                    elements = block.get("elements", [])
+                    for element in elements:
+                        if element.get("type") == "rich_text_section":
+                            section_elements = element.get("elements", [])
+                            for section_element in section_elements:
+                                if section_element.get("type") == "user":
+                                    user_id = section_element.get("user_id")
+                                    if user_id:
+                                        user_ids.append(user_id)
+            
+            # Also check for mentions in other possible locations
+            # Some Slack events might have user mentions in different structures
+            if "mentions" in payload:
+                mentions = payload["mentions"]
+                if isinstance(mentions, list):
+                    for mention in mentions:
+                        if isinstance(mention, dict) and "user" in mention:
+                            user_ids.append(mention["user"])
+                        elif isinstance(mention, str):
+                            user_ids.append(mention)
+            
+            # Check for user_mentions field (if it exists)
+            if "user_mentions" in payload:
+                user_mentions = payload["user_mentions"]
+                if isinstance(user_mentions, list):
+                    user_ids.extend(user_mentions)
+        
+        except Exception as e:
+            logger.warning(f"Error extracting mentions from payload: {e}")
+        
+        return user_ids
+
+    def _resolve_display_names_to_user_ids(self, display_names: List[str]) -> List[str]:
+        """Resolve display names to Slack user IDs using the Slack API."""
+        resolved_ids = []
+        
+        try:
+            # Get all users from the workspace
+            response = self.web_client.users_list(limit=1000)
+            if not response.get("ok"):
+                logger.warning("Failed to fetch users list from Slack API")
+                return resolved_ids
+            
+            users = response.get("members", [])
+            
+            # Create lookup maps for different name formats
+            username_to_id = {}  # Slack username (without @)
+            display_name_to_id = {}  # Display name
+            real_name_to_id = {}  # Real name
+            
+            for user in users:
+                if user.get("deleted") or user.get("is_bot"):
+                    continue
+                    
+                user_id = user.get("id")
+                username = user.get("name", "").lower()
+                profile = user.get("profile", {})
+                display_name = profile.get("display_name", "").lower()
+                real_name = profile.get("real_name", "").lower()
+                
+                if user_id and username:
+                    username_to_id[username] = user_id
+                if user_id and display_name:
+                    display_name_to_id[display_name] = user_id
+                if user_id and real_name:
+                    real_name_to_id[real_name] = user_id
+            
+            # Try to resolve each display name
+            for name in display_names:
+                name_lower = name.lower()
+                user_id = None
+                
+                # Try different matching strategies
+                if name_lower in username_to_id:
+                    user_id = username_to_id[name_lower]
+                elif name_lower in display_name_to_id:
+                    user_id = display_name_to_id[name_lower]
+                elif name_lower in real_name_to_id:
+                    user_id = real_name_to_id[name_lower]
+                else:
+                    for real_name, uid in real_name_to_id.items():
+                        if name_lower in real_name or real_name in name_lower:
+                            user_id = uid
+                            break
+                
+                if user_id:
+                    resolved_ids.append(user_id)
+                    logger.info(f"Resolved display name '{name}' to user ID '{user_id}'")
+                else:
+                    logger.warning(f"Could not resolve display name '{name}' to user ID")
+        
+        except Exception as e:
+            logger.error(f"Error resolving display names to user IDs: {e}")
+        
+        return resolved_ids
+
+    def ensure_users_exist(self, user_ids: List[str]) -> List[User]:
+        """Ensure all mentioned users exist in the database, create them if they don't."""
+        users = []
+        
+        for user_id in user_ids:
+            try:
+                # Try to get existing user
+                user = self.db.query(User).filter(User.slack_id == user_id).first()
+                
+                if not user:
+                    # User doesn't exist, create them by fetching from Slack API
+                    logger.info(f"Creating new user from mention: {user_id}")
+                    user = self.create_or_update_user(
+                        slack_id=user_id,
+                        fetch_from_slack=True
+                    )
+                
+                if user:
+                    users.append(user)
+                    
+            except Exception as e:
+                logger.error(f"Error ensuring user {user_id} exists: {e}")
+        
+        return users
 
     def get_channel_stats(self, channel_slack_id: str) -> Optional[Dict]:
         """Get emoji statistics for a specific channel."""
